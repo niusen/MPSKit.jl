@@ -29,14 +29,12 @@ end
 #constructors
 function LeftGaugedQP(datfun, left_gs, right_gs=left_gs;
                       sector=one(sectortype(left_gs)), momentum=0.0)
-    # find the left null spaces for the TNS
-    excitation_space = Vect[typeof(sector)](sector => 1)
+    #find the left null spaces for the TNS
+    excitation_space = ℂ[typeof(sector)](sector => 1)
     VLs = [adjoint(rightnull(adjoint(v))) for v in left_gs.AL]
-    Xs = [TensorMap{scalartype(left_gs)}(undef, _lastspace(VLs[loc])',
-                                         excitation_space' *
-                                         right_virtualspace(right_gs, loc))
+    Xs = [TensorMap(datfun, scalartype(left_gs.AL[1]), _lastspace(VLs[loc])',
+                    excitation_space' * right_virtualspace(right_gs, loc))
           for loc in 1:length(left_gs)]
-    fill_data!.(Xs, datfun)
     left_gs isa InfiniteMPS ||
         momentum == zero(momentum) ||
         @warn "momentum is ignored for finite quasiparticles"
@@ -46,12 +44,11 @@ end
 function RightGaugedQP(datfun, left_gs, right_gs=left_gs;
                        sector=one(sectortype(left_gs)), momentum=0.0)
     #find the left null spaces for the TNS
-    excitation_space = Vect[typeof(sector)](sector => 1)
+    excitation_space = ℂ[typeof(sector)](sector => 1)
     VRs = [adjoint(leftnull(adjoint(v))) for v in _transpose_tail.(right_gs.AR)]
-    Xs = [TensorMap{scalartype(left_gs)}(undef, left_virtualspace(right_gs, loc)',
-                                         excitation_space' * _firstspace(VRs[loc]))
-          for loc in 1:length(left_gs)]
-    fill_data!.(Xs, datfun)
+    Xs = [TensorMap(datfun, scalartype(left_gs.AL[1]),
+                    left_virtualspace(right_gs, loc - 1)',
+                    excitation_space' * _firstspace(VRs[loc])) for loc in 1:length(left_gs)]
     left_gs isa InfiniteMPS ||
         momentum == zero(momentum) ||
         @warn "momentum is ignored for finite quasiparticles"
@@ -86,9 +83,8 @@ end
 #conversion between gauges (partially implemented)
 function Base.convert(::Type{RightGaugedQP},
                       input::LeftGaugedQP{S}) where {S<:InfiniteMPS}
-    rg = RightGaugedQP(zero, input.left_gs, input.right_gs;
-                       sector=first(sectors(auxiliaryspace(input))),
-                       momentum=input.momentum)
+    rg = RightGaugedQP(zeros, input.left_gs, input.right_gs;
+                       sector=first(sectors(utilleg(input))), momentum=input.momentum)
     len = length(input)
 
     #construct environments
@@ -131,8 +127,8 @@ function Base.convert(::Type{RightGaugedQP},
 end
 function Base.convert(::Type{LeftGaugedQP},
                       input::RightGaugedQP{S}) where {S<:InfiniteMPS}
-    lg = LeftGaugedQP(zero, input.left_gs, input.right_gs;
-                      sector=first(sectors(auxiliaryspace(input))), momentum=input.momentum)
+    lg = LeftGaugedQP(zeros, input.left_gs, input.right_gs;
+                      sector=first(sectors(utilleg(input))), momentum=input.momentum)
     len = length(input)
 
     lBs = [@plansor t[-1; -2 -3] := input[1][1 2; -2 -3] *
@@ -171,17 +167,11 @@ function Base.convert(::Type{LeftGaugedQP},
 end
 
 # gauge independent code
-const QP{S,T1,T2} = Union{LeftGaugedQP{S,T1,T2},RightGaugedQP{S,T1,T2}}
-const FiniteQP{S<:FiniteMPS,T1,T2} = QP{S,T1,T2}
-const InfiniteQP{S<:InfiniteMPS,T1,T2} = QP{S,T1,T2}
+const QP{S,T1,T2} = Union{LeftGaugedQP{S,T1,T2},RightGaugedQP{S,T1,T2}} where {S,T1,T2}
+const FiniteQP{S,T1,T2} = QP{S,T1,T2} where {S<:FiniteMPS}
+const InfiniteQP{S,T1,T2} = QP{S,T1,T2} where {S<:InfiniteMPS}
 
-TensorKit.spacetype(::Union{QP{S},Type{<:QP{S}}}) where {S} = spacetype(S)
-TensorKit.sectortype(::Union{QP{S},Type{<:QP{S}}}) where {S} = sectortype(S)
-
-left_virtualspace(state::QP, i::Int) = left_virtualspace(state.left_gs, i)
-right_virtualspace(state::QP, i::Int) = right_virtualspace(state.right_gs, i)
-auxiliaryspace(state::QP) = space(state.Xs[1], 2)
-
+utilleg(v::QP) = space(v.Xs[1], 2)
 Base.copy(a::QP) = copy!(similar(a), a)
 Base.copyto!(a::QP, b::QP) = copy!(a, b)
 function Base.copy!(a::T, b::T) where {T<:QP}
@@ -258,7 +248,7 @@ function Base.convert(::Type{<:FiniteMPS}, v::QP{S}) where {S<:FiniteMPS}
 
     elt = scalartype(v)
 
-    utl = auxiliaryspace(v)
+    utl = utilleg(v)
     ou = oneunit(utl)
     utsp = ou ⊕ ou
     upper = isometry(storagetype(site_type(v.left_gs)), utsp, ou)
@@ -289,7 +279,7 @@ function Base.convert(::Type{<:FiniteMPS}, v::QP{S}) where {S<:FiniteMPS}
     end
 
     #step 1 : pass utl through Ls
-    passer = isomorphism(storagetype(eltype(Ls)), utl, utl)
+    passer = isomorphism(Matrix{elt}, utl, utl)
     for (i, L) in enumerate(Ls)
         @plansor temp[-1 -2 -3 -4; -5] := L[-2 -3; -4] * passer[-1; -5]
         Ls[i] = simplefuse(temp)
@@ -302,9 +292,9 @@ function Base.convert(::Type{<:FiniteMPS}, v::QP{S}) where {S<:FiniteMPS}
     push!(superspaces, supremum(_lastspace(Ls[end])', _lastspace(Rs[end])'))
 
     for i in 1:(length(v) + 1)
-        Lf = isometry(storagetype(Ls[i <= length(v) ? i : i - 1]), superspaces[i],
+        Lf = isometry(Matrix{elt}, superspaces[i],
                       i <= length(v) ? _firstspace(Ls[i]) : _lastspace(Ls[i - 1])')
-        Rf = isometry(storagetype(Rs[i <= length(v) ? i : i - 1]), superspaces[i],
+        Rf = isometry(Matrix{elt}, superspaces[i],
                       i <= length(v) ? _firstspace(Rs[i]) : _lastspace(Rs[i - 1])')
 
         if i <= length(v)

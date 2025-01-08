@@ -2,12 +2,12 @@
     struct Multiline{T}
 
 Object that represents multiple lines of objects of type `T`. Typically used to represent
-multiple lines of `InfiniteMPS` (`MultilineMPS`) or MPO (`Multiline{<:AbstractMPO}`).
+multiple lines of `InfiniteMPS` (`MPSMultiline`) or MPO (`Multiline{<:AbstractMPO}`).
 
 # Fields
 - `data::PeriodicArray{T,1}`: the data of the multiline object
 
-See also: [`MultilineMPS`](@ref) and [`MultilineMPO`](@ref)
+See also: [`MPSMultiline`](@ref) and [`MPOMultiline`](@ref)
 """
 struct Multiline{T}
     data::PeriodicArray{T,1}
@@ -24,10 +24,6 @@ Base.parent(m::Multiline) = m.data
 Base.size(m::Multiline) = (length(parent(m)), length(parent(m)[1]))
 Base.size(m::Multiline, i::Int) = getindex(size(m), i)
 Base.length(m::Multiline) = prod(size(m))
-function Base.axes(m::Multiline, i::Int)
-    return i == 1 ? axes(parent(m), 1) :
-           i == 2 ? axes(parent(m)[1], 1) : throw(ArgumentError("Invalid index $i"))
-end
 
 Base.getindex(m::Multiline, i::Int) = getindex(parent(m), i)
 Base.setindex!(m::Multiline, v, i::Int) = (setindex!(parent(m), v, i); m)

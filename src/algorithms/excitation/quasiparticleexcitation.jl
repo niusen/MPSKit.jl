@@ -167,7 +167,7 @@ end
 #                           Statmech Excitations                               #
 ################################################################################
 
-function excitations(H::MultilineMPO, alg::QuasiparticleAnsatz, ϕ₀::Multiline{<:InfiniteQP},
+function excitations(H::MPOMultiline, alg::QuasiparticleAnsatz, ϕ₀::Multiline{<:InfiniteQP},
                      lenvs, renvs; num=1, solver=Defaults.linearsolver)
     qp_envs(ϕ) = environments(ϕ, H, lenvs, renvs; solver)
     function H_eff(ϕ′)
@@ -182,25 +182,13 @@ function excitations(H::MultilineMPO, alg::QuasiparticleAnsatz, ϕ₀::Multiline
     return Es, map(Multiline, ϕs)
 end
 
-function excitations(H::InfiniteMPO, alg::QuasiparticleAnsatz, ϕ₀::InfiniteQP, lenvs, renvs;
-                     num=1, solver=Defaults.linearsolver)
-    qp_envs(ϕ) = environments(ϕ, H, lenvs, renvs; solver)
-    H_eff(ϕ) = effective_excitation_hamiltonian(H, ϕ, qp_envs(ϕ))
-
-    Es, ϕs, convhist = eigsolve(H_eff, ϕ₀, num, :LM, alg.alg)
-    convhist.converged < num &&
-        @warn "excitation failed to converge: normres = $(convhist.normres)"
-
-    return Es, ϕs
-end
-
-function excitations(H::MultilineMPO, alg::QuasiparticleAnsatz, ϕ₀::Multiline{<:InfiniteQP},
+function excitations(H::MPOMultiline, alg::QuasiparticleAnsatz, ϕ₀::Multiline{<:InfiniteQP},
                      lenvs; num=1, solver=Defaults.linearsolver)
     # Infer `renvs` in function body as it depends on `solver`.
     renvs = ϕ₀.trivial ? lenvs : environments(ϕ₀.right_gs, H; solver)
     return excitations(H, alg, ϕ₀, lenvs, renvs; num, solver)
 end
-function excitations(H::MultilineMPO, alg::QuasiparticleAnsatz, ϕ₀::Multiline{<:InfiniteQP};
+function excitations(H::MPOMultiline, alg::QuasiparticleAnsatz, ϕ₀::Multiline{<:InfiniteQP};
                      num=1, solver=Defaults.linearsolver)
     # Infer `lenvs` in function body as it depends on `solver`.
     lenvs = environments(ϕ₀.left_gs, H; solver)
@@ -212,19 +200,19 @@ function excitations(H::DenseMPO, alg::QuasiparticleAnsatz, momentum::Real,
                      lenvs=environments(lmps, H), rmps::InfiniteMPS=lmps,
                      renvs=lmps === rmps ? lenvs : environments(rmps, H);
                      sector=one(sectortype(lmps)), num=1, solver=Defaults.linearsolver)
-    multiline_lmps = convert(MultilineMPS, lmps)
+    multiline_lmps = convert(MPSMultiline, lmps)
     if lmps === rmps
-        excitations(convert(MultilineMPO, H), alg, momentum, multiline_lmps, lenvs,
+        excitations(convert(MPOMultiline, H), alg, momentum, multiline_lmps, lenvs,
                     multiline_lmps,
                     lenvs; sector, num, solver)
     else
-        excitations(convert(MultilineMPO, H), alg, momentum, multiline_lmps, lenvs,
-                    convert(MultilineMPS, rmps), renvs; sector, num, solver)
+        excitations(convert(MPOMultiline, H), alg, momentum, multiline_lmps, lenvs,
+                    convert(MPSMultiline, rmps), renvs; sector, num, solver)
     end
 end
 
-function excitations(H::MultilineMPO, alg::QuasiparticleAnsatz, momentum::Real,
-                     lmps::MultilineMPS,
+function excitations(H::MPOMultiline, alg::QuasiparticleAnsatz, momentum::Real,
+                     lmps::MPSMultiline,
                      lenvs=environments(lmps, H), rmps=lmps,
                      renvs=lmps === rmps ? lenvs : environments(rmps, H);
                      sector=one(sectortype(lmps)), num=1, solver=Defaults.linearsolver)
@@ -239,21 +227,31 @@ end
 #                                H_eff                                         #
 ################################################################################
 
-function effective_excitation_hamiltonian(H::Union{InfiniteMPOHamiltonian,
-                                                   FiniteMPOHamiltonian}, ϕ::QP,
+function effective_excitation_hamiltonian(H::MPOHamiltonian, ϕ::QP,
                                           envs=environments(ϕ, H),
                                           energy=effective_excitation_renormalization_energy(H,
                                                                                              ϕ,
-                                                                                             envs.leftenvs,
-                                                                                             envs.rightenvs))
+                                                                                             envs.lenvs,
+                                                                                             envs.renvs))
     ϕ′ = similar(ϕ)
-    tforeach(1:length(ϕ); scheduler=Defaults.scheduler[]) do loc
-        return ϕ′[loc] = _effective_excitation_local_apply(loc, ϕ, H, energy[loc], envs)
+
+    @static if Defaults.parallelize_sites
+        @sync for loc in 1:length(ϕ)
+            Threads.@spawn begin
+                ϕ′[loc] = _effective_excitation_local_apply(loc, ϕ, H, energy[loc],
+                                                            envs)
+            end
+        end
+    else
+        for loc in 1:length(ϕ)
+            ϕ′[loc] = _effective_excitation_local_apply(loc, ϕ, H, energy[loc], envs)
+        end
     end
+
     return ϕ′
 end
 
-function effective_excitation_hamiltonian(H::MultilineMPO, ϕ::Multiline{<:InfiniteQP},
+function effective_excitation_hamiltonian(H::MPOMultiline, ϕ::Multiline{<:InfiniteQP},
                                           envs=environments(ϕ, H))
     ϕ′ = Multiline(similar.(ϕ.data))
     left_gs = ϕ.left_gs
@@ -290,101 +288,45 @@ function effective_excitation_hamiltonian(H::MultilineMPO, ϕ::Multiline{<:Infin
     return ϕ′
 end
 
-function effective_excitation_hamiltonian(H::InfiniteMPO, ϕ::InfiniteQP,
-                                          envs=environments(ϕ, H))
-    ϕ′ = similar(ϕ)
-    left_gs = ϕ.left_gs
-    right_gs = ϕ.right_gs
-
-    Bs = [ϕ[i] for i in 1:length(H)]
-    for site in 1:length(ϕ)
-        en = @plansor conj(left_gs.AC[site][2 6; 4]) *
-                      leftenv(envs.leftenvs, site, left_gs)[2 5; 3] *
-                      left_gs.AC[site][3 7; 1] *
-                      H[site][5 6; 7 8] *
-                      rightenv(envs.leftenvs, site, left_gs)[1 8; 4]
-
-        @plansor T[-1 -2; -3 -4] := leftenv(envs.leftenvs, site, left_gs)[-1 5; 4] *
-                                    Bs[site][4 2; -3 1] *
-                                    H[site][5 -2; 2 3] *
-                                    rightenv(envs.rightenvs, site, right_gs)[1 3; -4]
-
-        @plansor T[-1 -2; -3 -4] += envs.leftBenvs[site][-1 4; -3 5] *
-                                    right_gs.AR[site][5 2; 1] *
-                                    H[site][4 -2; 2 3] *
-                                    rightenv(envs.rightenvs, site, right_gs)[1 3; -4]
-
-        @plansor T[-1 -2; -3 -4] += leftenv(envs.leftenvs, site, left_gs)[-1 2; 1] *
-                                    left_gs.AL[site][1 3; 4] *
-                                    H[site][2 -2; 3 5] *
-                                    envs.rightBenvs[site][4 5; -3 -4]
-
-        ϕ′[site] = T / en
-    end
-
-    return ϕ′
-end
-
-function _effective_excitation_local_apply(site, ϕ,
-                                           H::Union{InfiniteMPOHamiltonian,
-                                                    FiniteMPOHamiltonian}, E::Number,
-                                           envs)
-    B = ϕ[site]
-    GL = leftenv(envs.leftenvs, site, ϕ.left_gs)
-    GR = rightenv(envs.rightenvs, site, ϕ.right_gs)
+function _effective_excitation_local_apply(loc, ϕ, H::MPOHamiltonian, E::Number, envs)
+    B = ϕ[loc]
+    GL = leftenv(envs.lenvs, loc, ϕ.left_gs)
+    GR = rightenv(envs.renvs, loc, ϕ.right_gs)
 
     # renormalize first -> allocates destination
     B′ = scale(B, -E)
 
-    # B in center
-    @plansor B′[-1 -2; -3 -4] += GL[-1 5; 4] *
-                                 B[4 2; -3 1] *
-                                 H[site][5 -2; 2 3] *
-                                 GR[1 3; -4]
+    # add all contributions
+    for (j, k) in keys(H[loc])
+        h = H[loc][j, k]
+        # B in center
+        @plansor begin
+            B′[-1 -2; -3 -4] += GL[j][-1 5; 4] * B[4 2; -3 1] * h[5 -2; 2 3] *
+                                GR[k][1 3; -4]
+        end
 
-    # B to the left
-    if site > 1 || ϕ isa InfiniteQP
-        AR = ϕ.right_gs.AR[site]
-        GBL = envs.leftBenvs[site]
-        @plansor B′[-1 -2; -3 -4] += GBL[-1 4; -3 5] *
-                                     AR[5 2; 1] *
-                                     H[site][4 -2; 2 3] *
-                                     GR[1 3; -4]
-    end
+        # B to the left
+        if loc > 1 || ϕ isa InfiniteQP
+            AR = ϕ.right_gs.AR[loc]
+            GBL = envs.lBs[j, loc]
+            @plansor begin
+                B′[-1 -2; -3 -4] += GBL[-1 4; -3 5] * AR[5 2; 1] * h[4 -2; 2 3] *
+                                    GR[k][1 3; -4]
+            end
+        end
 
-    # B to the right
-    if site < length(ϕ.left_gs) || ϕ isa InfiniteQP
-        AL = ϕ.left_gs.AL[site]
-        GBR = envs.rightBenvs[site]
-        @plansor B′[-1 -2; -3 -4] += GL[-1 2; 1] *
-                                     AL[1 3; 4] *
-                                     H[site][2 -2; 3 5] *
-                                     GBR[4 5; -3 -4]
+        # B to the right
+        if loc < length(ϕ.left_gs) || ϕ isa InfiniteQP
+            AL = ϕ.left_gs.AL[loc]
+            GBR = envs.rBs[k, loc]
+            @plansor begin
+                B′[-1 -2; -3 -4] += GL[j][-1 2; 1] * AL[1 3; 4] * h[2 -2; 3 5] *
+                                    GBR[4 5; -3 -4]
+            end
+        end
     end
 
     return B′
-end
-
-function effective_excitation_renormalization_energy(H::Union{InfiniteMPO,
-                                                              InfiniteMPOHamiltonian,
-                                                              FiniteMPOHamiltonian}, ϕ,
-                                                     lenvs,
-                                                     renvs)
-    ψ_left = ϕ.left_gs
-    E_left = map(1:length(ϕ)) do site
-        return contract_mpo_expval(ψ_left.AC[site], leftenv(lenvs, site, ψ_left),
-                                   H[site], rightenv(lenvs, site, ψ_left))
-    end
-
-    ϕ.trivial && return E_left
-
-    ψ_right = ϕ.right_gs
-    E_right = map(1:length(ϕ)) do site
-        return contract_mpo_expval(ψ_right.AC[site], leftenv(renvs, site, ψ_right),
-                                   H[site], rightenv(renvs, site, ψ_right))
-    end
-
-    return (E_left .+ E_right) ./ 2
 end
 
 function effective_excitation_renormalization_energy(H, ϕ, lenvs, renvs)

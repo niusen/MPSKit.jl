@@ -19,42 +19,39 @@ algorithm for time evolution.
 end
 
 function timestep(ψ::InfiniteMPS, H, t::Number, dt::Number, alg::TDVP,
-                  envs::AbstractMPSEnvironments=environments(ψ, H);
+                  envs::Union{Cache,MultipleEnvironments}=environments(ψ, H);
                   leftorthflag=true)
     temp_ACs = similar(ψ.AC)
-    temp_Cs = similar(ψ.C)
+    temp_CRs = similar(ψ.CR)
 
-    scheduler = Defaults.scheduler[]
-    if scheduler isa SerialScheduler
-        temp_ACs = tmap!(temp_ACs, 1:length(ψ); scheduler) do loc
-            return integrate(∂∂AC(loc, ψ, H, envs), ψ.AC[loc], t, dt, alg.integrator)
-        end
-        temp_Cs = tmap!(temp_Cs, 1:length(ψ); scheduler) do loc
-            return integrate(∂∂C(loc, ψ, H, envs), ψ.C[loc], t, dt, alg.integrator)
+    @static if Defaults.parallelize_sites
+        @sync for (loc, (ac, c)) in enumerate(zip(ψ.AC, ψ.CR))
+            Threads.@spawn begin
+                h_ac = ∂∂AC(loc, ψ, H, envs)
+                temp_ACs[loc] = integrate(h_ac, ac, t, dt, alg.integrator)
+            end
+
+            Threads.@spawn begin
+                h_c = ∂∂C(loc, ψ, H, envs)
+                temp_CRs[loc] = integrate(h_c, c, t, dt, alg.integrator)
+            end
         end
     else
-        @sync begin
-            Threads.@spawn begin
-                temp_ACs = tmap!(temp_ACs, 1:length(ψ); scheduler) do loc
-                    return integrate(∂∂AC(loc, ψ, H, envs), ψ.AC[loc], t, dt,
-                                     alg.integrator)
-                end
-            end
-            Threads.@spawn begin
-                temp_Cs = tmap!(temp_Cs, 1:length(ψ); scheduler) do loc
-                    return integrate(∂∂C(loc, ψ, H, envs), ψ.C[loc], t, dt, alg.integrator)
-                end
-            end
+        for (loc, (ac, c)) in enumerate(zip(ψ.AC, ψ.CR))
+            h_ac = ∂∂AC(loc, ψ, H, envs)
+            temp_ACs[loc] = integrate(h_ac, ac, t, dt, alg.integrator)
+            h_c = ∂∂C(loc, ψ, H, envs)
+            temp_CRs[loc] = integrate(h_c, c, t, dt, alg.integrator)
         end
     end
 
     if leftorthflag
-        regauge!.(temp_ACs, temp_Cs; alg=TensorKit.QRpos())
-        ψ′ = InfiniteMPS(temp_ACs, ψ.C[end]; tol=alg.tolgauge, maxiter=alg.gaugemaxiter)
+        regauge!.(temp_ACs, temp_CRs; alg=TensorKit.QRpos())
+        ψ′ = InfiniteMPS(temp_ACs, ψ.CR[end]; tol=alg.tolgauge, maxiter=alg.gaugemaxiter)
     else
-        circshift!(temp_Cs, 1)
-        regauge!.(temp_Cs, temp_ACs; alg=TensorKit.LQpos())
-        ψ′ = InfiniteMPS(ψ.C[0], temp_ACs; tol=alg.tolgauge, maxiter=alg.gaugemaxiter)
+        circshift!(temp_CRs, 1)
+        regauge!.(temp_CRs, temp_ACs; alg=TensorKit.LQpos())
+        ψ′ = InfiniteMPS(ψ.CR[0], temp_ACs; tol=alg.tolgauge, maxiter=alg.gaugemaxiter)
     end
 
     recalculate!(envs, ψ′)
@@ -62,7 +59,7 @@ function timestep(ψ::InfiniteMPS, H, t::Number, dt::Number, alg::TDVP,
 end
 
 function timestep!(ψ::AbstractFiniteMPS, H, t::Number, dt::Number, alg::TDVP,
-                   envs::AbstractMPSEnvironments=environments(ψ, H))
+                   envs::Union{Cache,MultipleEnvironments}=environments(ψ, H))
 
     # sweep left to right
     for i in 1:(length(ψ) - 1)
@@ -70,7 +67,7 @@ function timestep!(ψ::AbstractFiniteMPS, H, t::Number, dt::Number, alg::TDVP,
         ψ.AC[i] = integrate(h_ac, ψ.AC[i], t, dt / 2, alg.integrator)
 
         h_c = ∂∂C(i, ψ, H, envs)
-        ψ.C[i] = integrate(h_c, ψ.C[i], t, -dt / 2, alg.integrator)
+        ψ.CR[i] = integrate(h_c, ψ.CR[i], t, -dt / 2, alg.integrator)
     end
 
     # edge case
@@ -83,7 +80,7 @@ function timestep!(ψ::AbstractFiniteMPS, H, t::Number, dt::Number, alg::TDVP,
         ψ.AC[i] = integrate(h_ac, ψ.AC[i], t + dt / 2, dt / 2, alg.integrator)
 
         h_c = ∂∂C(i - 1, ψ, H, envs)
-        ψ.C[i - 1] = integrate(h_c, ψ.C[i - 1], t + dt / 2, -dt / 2, alg.integrator)
+        ψ.CR[i - 1] = integrate(h_c, ψ.CR[i - 1], t + dt / 2, -dt / 2, alg.integrator)
     end
 
     # edge case
@@ -116,7 +113,7 @@ algorithm for time evolution.
 end
 
 function timestep!(ψ::AbstractFiniteMPS, H, t::Number, dt::Number, alg::TDVP2,
-                   envs::AbstractMPSEnvironments=environments(ψ, H))
+                   envs=environments(ψ, H))
 
     # sweep left to right
     for i in 1:(length(ψ) - 1)
@@ -155,7 +152,6 @@ end
 
 #copying version
 function timestep(ψ::AbstractFiniteMPS, H, time::Number, timestep::Number,
-                  alg::Union{TDVP,TDVP2}, envs::AbstractMPSEnvironments=environments(ψ, H);
-                  kwargs...)
+                  alg::Union{TDVP,TDVP2}, envs=environments(ψ, H); kwargs...)
     return timestep!(copy(ψ), H, time, timestep, alg, envs; kwargs...)
 end

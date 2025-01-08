@@ -26,17 +26,17 @@ function _expand!(ψ::InfiniteMPS, AL′::PeriodicVector, AR′::PeriodicVector)
 
         # update C: add vectors, make room for new vectors:
         # C -> [C 0; 0 expansion]
-        l = zerovector!(similar(ψ.C[i], codomain(ψ.C[i]) ← _firstspace(AR′[i + 1])))
-        ψ.C[i] = catdomain(ψ.C[i], l)
-        r = zerovector!(similar(ψ.C[i], _lastspace(AL′[i])' ← domain(ψ.C[i])))
-        ψ.C[i] = catcodomain(ψ.C[i], r)
+        l = zerovector!(similar(ψ.CR[i], codomain(ψ.CR[i]) ← _firstspace(AR′[i + 1])))
+        ψ.CR[i] = catdomain(ψ.CR[i], l)
+        r = zerovector!(similar(ψ.CR[i], _lastspace(AL′[i])' ← domain(ψ.CR[i])))
+        ψ.CR[i] = catcodomain(ψ.CR[i], r)
 
         # update AC: recalculate
-        ψ.AC[i] = ψ.AL[i] * ψ.C[i]
+        ψ.AC[i] = ψ.AL[i] * ψ.CR[i]
     end
     return normalize!(ψ)
 end
-function _expand!(ψ::MultilineMPS, AL′::PeriodicMatrix, AR′::PeriodicMatrix)
+function _expand!(ψ::MPSMultiline, AL′::PeriodicMatrix, AR′::PeriodicMatrix)
     for i in 1:size(ψ, 1)
         _expand!(ψ[i], AL′[i, :], AR′[i, :])
     end

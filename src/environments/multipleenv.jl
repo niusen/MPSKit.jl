@@ -1,5 +1,5 @@
-struct MultipleEnvironments{O,C} <: AbstractMPSEnvironments
-    operator::O
+struct MultipleEnvironments{O,C} <: Cache
+    opp::O
     envs::Vector{C}
 end
 
@@ -15,7 +15,7 @@ function environments(st, H::LazySum)
     return MultipleEnvironments(H, map(op -> environments(st, op), H.ops))
 end
 
-function environments(st::Union{InfiniteMPS,MultilineMPS}, H::LazySum;
+function environments(st::Union{InfiniteMPS,MPSMultiline}, H::LazySum;
                       solver=Defaults.linearsolver)
     if !(solver isa Vector)
         solver = repeat([solver], length(H))
@@ -23,13 +23,6 @@ function environments(st::Union{InfiniteMPS,MultilineMPS}, H::LazySum;
     return MultipleEnvironments(H,
                                 map((op, solv) -> environments(st, op; solver=solv),
                                     H.ops, solver))
-end
-
-# TODO: fix this such that `T(...) isa T`
-function IDMRGEnvironments(ψ::Union{MultilineMPS,InfiniteMPS}, env::MultipleEnvironments)
-    envs = IDMRGEnvironments.(Ref(ψ), env.envs)
-    Hs = getproperty.(env.envs, :operator)
-    return MultipleEnvironments(LazySum(Hs), envs)
 end
 
 #broadcast vs map?
@@ -59,34 +52,11 @@ function recalculate!(env::MultipleEnvironments, args...; kwargs...)
     return env
 end
 
-function check_recalculate!(env::MultipleEnvironments, args...; kwargs...)
-    for subenv in env.envs
-        check_recalculate!(subenv, args...; kwargs...)
-    end
-    return env
-end
-
 #maybe this can be used to provide compatibility with existing code?
 function Base.getproperty(envs::MultipleEnvironments, prop::Symbol)
     if prop === :solver
         return map(env -> env.solver, envs)
     else
         return getfield(envs, prop)
-    end
-end
-
-function update_rightenv!(envs::MultipleEnvironments{<:LazySum,<:IDMRGEnvironments}, st, H,
-                          pos::Int)
-    for (subH, subenv) in zip(H, envs.envs)
-        tm = TransferMatrix(st.AR[pos + 1], subH[pos + 1], st.AR[pos + 1])
-        setrightenv!(subenv, pos, tm * rightenv(subenv, pos + 1))
-    end
-end
-
-function update_leftenv!(envs::MultipleEnvironments{<:LazySum,<:IDMRGEnvironments}, st, H,
-                         pos::Int)
-    for (subH, subenv) in zip(H, envs.envs)
-        tm = TransferMatrix(st.AL[pos - 1], subH[pos - 1], st.AL[pos - 1])
-        setleftenv!(subenv, pos, leftenv(subenv, pos - 1) * tm)
     end
 end

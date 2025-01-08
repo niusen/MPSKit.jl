@@ -7,11 +7,11 @@ Type that represents an infinite Matrix Product State.
 - `AL` -- left-gauged MPS tensors
 - `AR` -- right-gauged MPS tensors
 - `AC` -- center-gauged MPS tensors
-- `C` -- gauge tensors
+- `CR` -- gauge tensors
 
 ## Notes
 By convention, we have that:
-- `AL[i] * C[i]` = `AC[i]` = `C[i-1] * AR[i]`
+- `AL[i] * CR[i]` = `AC[i]` = `CR[i-1] * AR[i]`
 - `AL[i]' * AL[i] = 1`
 - `AR[i] * AR[i]' = 1`
 
@@ -46,35 +46,35 @@ tensors `As`, or a list of left-gauged tensors `ALs`.
 struct InfiniteMPS{A<:GenericMPSTensor,B<:MPSBondTensor} <: AbstractMPS
     AL::PeriodicVector{A}
     AR::PeriodicVector{A}
-    C::PeriodicVector{B}
+    CR::PeriodicVector{B}
     AC::PeriodicVector{A}
     function InfiniteMPS{A,B}(AL::PeriodicVector{A},
                               AR::PeriodicVector{A},
-                              C::PeriodicVector{B},
-                              AC::PeriodicVector{A}=AL .* C) where {A<:GenericMPSTensor,
-                                                                    B<:MPSBondTensor}
+                              CR::PeriodicVector{B},
+                              AC::PeriodicVector{A}=AL .* CR) where {A<:GenericMPSTensor,
+                                                                     B<:MPSBondTensor}
         # verify lengths are compatible
         L = length(AL)
-        L == length(AR) == length(C) == length(AC) ||
-            throw(ArgumentError("incompatible lengths of AL, AR, C, and AC"))
+        L == length(AR) == length(CR) == length(AC) ||
+            throw(ArgumentError("incompatible lengths of AL, AR, CR, and AC"))
         # verify tensors are compatible
         spacetype(A) == spacetype(B) ||
-            throw(SpaceMismatch("incompatible space types of AL and C"))
+            throw(SpaceMismatch("incompatible space types of AL and CR"))
 
-        return new{A,B}(AL, AR, C, AC)
+        return new{A,B}(AL, AR, CR, AC)
     end
     function InfiniteMPS(AL::PeriodicVector{A},
                          AR::PeriodicVector{A},
-                         C::PeriodicVector{B},
-                         AC::PeriodicVector{A}=AL .* C) where {A<:GenericMPSTensor,
-                                                               B<:MPSBondTensor}
+                         CR::PeriodicVector{B},
+                         AC::PeriodicVector{A}=AL .* CR) where {A<:GenericMPSTensor,
+                                                                B<:MPSBondTensor}
         # verify lengths are compatible
         L = length(AL)
-        L == length(AR) == length(C) == length(AC) ||
-            throw(ArgumentError("incompatible lengths of AL, AR, C, and AC"))
+        L == length(AR) == length(CR) == length(AC) ||
+            throw(ArgumentError("incompatible lengths of AL, AR, CR, and AC"))
         # verify tensors are compatible
         spacetype(A) == spacetype(B) ||
-            throw(SpaceMismatch("incompatible space types of AL and C"))
+            throw(SpaceMismatch("incompatible space types of AL and CR"))
 
         for i in 1:L
             N = numind(AL[i])
@@ -92,14 +92,14 @@ struct InfiniteMPS{A<:GenericMPSTensor,B<:MPSBondTensor} <: AbstractMPS
                 space(AR[i], 1) == dual(space(AR[i - 1], N)) &&
                 space(AC[i], 1) == space(AL[i], 1) &&
                 space(AC[i], N) == space(AR[i], N) &&
-                space(C[i], 1) == dual(space(AL[i], N)) &&
-                space(AR[i], 1) == dual(space(C[i - 1], 2)) ||
+                space(CR[i], 1) == dual(space(AL[i], N)) &&
+                space(AR[i], 1) == dual(space(CR[i - 1], 2)) ||
                 throw(SpaceMismatch("incompatible virtual spaces at site $i"))
             # verify that the spaces are non-zero
-            dim(space(AL[i])) > 0 && dim(space(C[i])) > 0 ||
+            dim(space(AL[i])) > 0 && dim(space(CR[i])) > 0 ||
                 @warn "no fusion channels available at site $i"
         end
-        return new{A,B}(AL, AR, C, AC)
+        return new{A,B}(AL, AR, CR, AC)
     end
 end
 
@@ -107,11 +107,11 @@ end
 Constructors
 ===========================================================================================#
 
-function InfiniteMPS(AL::AbstractVector{A}, AR::AbstractVector{A}, C::AbstractVector{B},
-                     AC::AbstractVector{A}=AL .* C) where {A<:GenericMPSTensor,
-                                                           B<:MPSBondTensor}
+function InfiniteMPS(AL::AbstractVector{A}, AR::AbstractVector{A}, CR::AbstractVector{B},
+                     AC::AbstractVector{A}=AL .* CR) where {A<:GenericMPSTensor,
+                                                            B<:MPSBondTensor}
     return InfiniteMPS(convert(PeriodicVector{A}, AL), convert(PeriodicVector{A}, AR),
-                       convert(PeriodicVector{B}, C), convert(PeriodicVector{A}, AC))
+                       convert(PeriodicVector{B}, CR), convert(PeriodicVector{A}, AC))
 end
 
 function InfiniteMPS(pspaces::AbstractVector{S}, Dspaces::AbstractVector{S};
@@ -163,12 +163,12 @@ function InfiniteMPS(A::AbstractVector{<:GenericMPSTensor}; kwargs...)
     # initialize tensor storage
     AL = similar.(AR)
     AC = similar.(AR)
-    C = similar(AR, typeof(C₀))
-    ψ = InfiniteMPS{eltype(AL),eltype(C)}(AL, AR, C, AC)
+    CR = similar(AR, typeof(C₀))
+    ψ = InfiniteMPS{eltype(AL),eltype(CR)}(AL, AR, CR, AC)
 
     # gaugefix the MPS
     gaugefix!(ψ, A_copy, C₀; kwargs...)
-    mul!.(ψ.AC, ψ.AL, ψ.C)
+    mul!.(ψ.AC, ψ.AL, ψ.CR)
 
     return ψ
 end
@@ -182,12 +182,12 @@ function InfiniteMPS(AL::AbstractVector{<:GenericMPSTensor}, C₀::MPSBondTensor
     # initialize tensor storage
     AC = similar.(AL)
     AR = similar.(AL)
-    C = similar(AR, typeof(C₀))
-    ψ = InfiniteMPS{eltype(AL),eltype(C)}(AL, AR, C, AC)
+    CR = similar(AR, typeof(C₀))
+    ψ = InfiniteMPS{eltype(AL),eltype(CR)}(AL, AR, CR, AC)
 
     # gaugefix the MPS
     gaugefix!(ψ, AL, C₀; order=:R, kwargs...)
-    mul!.(ψ.AC, ψ.AL, ψ.C)
+    mul!.(ψ.AC, ψ.AL, ψ.CR)
 
     return ψ
 end
@@ -198,12 +198,12 @@ function InfiniteMPS(C₀::MPSBondTensor, AR::AbstractVector{<:GenericMPSTensor}
     # initialize tensor storage
     AC = similar.(AR)
     AL = similar.(AR)
-    C = similar(AR, typeof(C₀))
-    ψ = InfiniteMPS{eltype(AL),eltype(C)}(AL, AR, C, AC)
+    CR = similar(AR, typeof(C₀))
+    ψ = InfiniteMPS{eltype(AL),eltype(CR)}(AL, AR, CR, AC)
 
     # gaugefix the MPS
     gaugefix!(ψ, AR, C₀; order=:L, kwargs...)
-    mul!.(ψ.AC, ψ.AL, ψ.C)
+    mul!.(ψ.AC, ψ.AL, ψ.CR)
 
     return ψ
 end
@@ -215,15 +215,15 @@ Utility
 Base.size(ψ::InfiniteMPS, args...) = size(ψ.AL, args...)
 Base.length(ψ::InfiniteMPS) = length(ψ.AL)
 Base.eltype(ψ::InfiniteMPS) = eltype(ψ.AL)
-Base.copy(ψ::InfiniteMPS) = InfiniteMPS(copy(ψ.AL), copy(ψ.AR), copy(ψ.C), copy(ψ.AC))
+Base.copy(ψ::InfiniteMPS) = InfiniteMPS(copy(ψ.AL), copy(ψ.AR), copy(ψ.CR), copy(ψ.AC))
 function Base.repeat(ψ::InfiniteMPS, i::Int)
-    return InfiniteMPS(repeat(ψ.AL, i), repeat(ψ.AR, i), repeat(ψ.C, i), repeat(ψ.AC, i))
+    return InfiniteMPS(repeat(ψ.AL, i), repeat(ψ.AR, i), repeat(ψ.CR, i), repeat(ψ.AC, i))
 end
 function Base.similar(ψ::InfiniteMPS{A,B}) where {A,B}
-    return InfiniteMPS{A,B}(similar(ψ.AL), similar(ψ.AR), similar(ψ.C), similar(ψ.AC))
+    return InfiniteMPS{A,B}(similar(ψ.AL), similar(ψ.AR), similar(ψ.CR), similar(ψ.AC))
 end
 function Base.circshift(ψ::InfiniteMPS, n)
-    return InfiniteMPS(circshift(ψ.AL, n), circshift(ψ.AR, n), circshift(ψ.C, n),
+    return InfiniteMPS(circshift(ψ.AL, n), circshift(ψ.AR, n), circshift(ψ.CR, n),
                        circshift(ψ.AC, n))
 end
 
@@ -232,21 +232,31 @@ Base.checkbounds(::Type{Bool}, ψ::InfiniteMPS, i::Integer) = true
 site_type(::Type{<:InfiniteMPS{A}}) where {A} = A
 bond_type(::Type{<:InfiniteMPS{<:Any,B}}) where {B} = B
 
-left_virtualspace(ψ::InfiniteMPS, n::Integer) = left_virtualspace(ψ.AL[n])
-right_virtualspace(ψ::InfiniteMPS, n::Integer) = right_virtualspace(ψ.AL[n])
-physicalspace(ψ::InfiniteMPS, n::Integer) = physicalspace(ψ.AL[n])
+left_virtualspace(ψ::InfiniteMPS, n::Integer) = _firstspace(ψ.CR[n])
+right_virtualspace(ψ::InfiniteMPS, n::Integer) = dual(_lastspace(ψ.CR[n]))
+
+function physicalspace(ψ::InfiniteMPS{<:GenericMPSTensor{<:Any,N}}, n::Integer) where {N}
+    if N == 1
+        return ProductSpace{spacetype(ψ)}()
+    elseif N == 2
+        return space(ψ.AL[n], 2)
+    else
+        return ProductSpace{spacetype(ψ),N - 1}(space.(Ref(ψ.AL[n]),
+                                                       Base.front(Base.tail(TensorKit.allind(ψ.AL[n])))))
+    end
+end
 physicalspace(ψ::InfiniteMPS) = PeriodicArray(map(Base.Fix1(physicalspace, ψ), 1:length(ψ)))
 
-# TensorKit.space(ψ::InfiniteMPS{<:MPSTensor}, n::Integer) = space(ψ.AC[n], 2)
-# function TensorKit.space(ψ::InfiniteMPS{<:GenericMPSTensor}, n::Integer)
-#     t = ψ.AC[n]
-#     S = spacetype(t)
-#     return ProductSpace{S}(space.(Ref(t), Base.front(Base.tail(TensorKit.allind(t)))))
-# end
+TensorKit.space(ψ::InfiniteMPS{<:MPSTensor}, n::Integer) = space(ψ.AC[n], 2)
+function TensorKit.space(ψ::InfiniteMPS{<:GenericMPSTensor}, n::Integer)
+    t = ψ.AC[n]
+    S = spacetype(t)
+    return ProductSpace{S}(space.(Ref(t), Base.front(Base.tail(TensorKit.allind(t)))))
+end
 
 TensorKit.norm(ψ::InfiniteMPS) = norm(ψ.AC[1])
 function TensorKit.normalize!(ψ::InfiniteMPS)
-    normalize!.(ψ.C)
+    normalize!.(ψ.CR)
     normalize!.(ψ.AC)
     return ψ
 end
@@ -257,9 +267,6 @@ function TensorKit.dot(ψ₁::InfiniteMPS, ψ₂::InfiniteMPS; krylovdim=30)
     val, = fixedpoint(TransferMatrix(ψ₂.AL, ψ₁.AL), init, :LM,
                       Arnoldi(; krylovdim=krylovdim))
     return val
-end
-function Base.isapprox(ψ₁::InfiniteMPS, ψ₂::InfiniteMPS; kwargs...)
-    return isapprox(dot(ψ₁, ψ₂), 1; kwargs...)
 end
 
 function Base.show(io::IO, ::MIME"text/plain", ψ::InfiniteMPS)
@@ -281,7 +288,7 @@ function Base.show(io::IOContext, ψ::InfiniteMPS)
     for site in reverse(1:L)
         if site < half_screen_rows || site > L - half_screen_rows
             if site == L
-                println(io, charset.ver, " C[$site]: ", ψ.C[site])
+                println(io, charset.ver, " CR[$site]: ", ψ.CR[site])
             end
             println(io, charset.mid, charset.dash, " AL[$site]: ", ψ.AL[site])
         elseif site == half_screen_rows
@@ -301,21 +308,21 @@ Fixedpoints
 
 Left dominant eigenvector of the `AR`-`AR` transfermatrix.
 """
-l_RR(ψ::InfiniteMPS, loc::Int=1) = adjoint(ψ.C[loc - 1]) * ψ.C[loc - 1]
+l_RR(ψ::InfiniteMPS, loc::Int=1) = adjoint(ψ.CR[loc - 1]) * ψ.CR[loc - 1]
 
 """
     l_RL(ψ, location)
 
 Left dominant eigenvector of the `AR`-`AL` transfermatrix.
 """
-l_RL(ψ::InfiniteMPS, loc::Int=1) = ψ.C[loc - 1]
+l_RL(ψ::InfiniteMPS, loc::Int=1) = ψ.CR[loc - 1]
 
 """
     l_LR(ψ, location)
 
 Left dominant eigenvector of the `AL`-`AR` transfermatrix.
 """
-l_LR(ψ::InfiniteMPS, loc::Int=1) = ψ.C[loc - 1]'
+l_LR(ψ::InfiniteMPS, loc::Int=1) = ψ.CR[loc - 1]'
 
 """
     l_LL(ψ, location)
@@ -323,7 +330,7 @@ l_LR(ψ::InfiniteMPS, loc::Int=1) = ψ.C[loc - 1]'
 Left dominant eigenvector of the `AL`-`AL` transfermatrix.
 """
 function l_LL(ψ::InfiniteMPS{A}, loc::Int=1) where {A}
-    return isomorphism(storagetype(A), left_virtualspace(ψ, loc), left_virtualspace(ψ, loc))
+    return isomorphism(storagetype(A), space(ψ.AL[loc], 1), space(ψ.AL[loc], 1))
 end
 
 """
@@ -332,8 +339,7 @@ end
 Right dominant eigenvector of the `AR`-`AR` transfermatrix.
 """
 function r_RR(ψ::InfiniteMPS{A}, loc::Int=length(ψ)) where {A}
-    return isomorphism(storagetype(A), right_virtualspace(ψ, loc),
-                       right_virtualspace(ψ, loc))
+    return isomorphism(storagetype(A), domain(ψ.AR[loc]), domain(ψ.AR[loc]))
 end
 
 """
@@ -341,18 +347,18 @@ end
 
 Right dominant eigenvector of the `AR`-`AL` transfermatrix.
 """
-r_RL(ψ::InfiniteMPS, loc::Int=length(ψ)) = ψ.C[loc]'
+r_RL(ψ::InfiniteMPS, loc::Int=length(ψ)) = ψ.CR[loc]'
 
 """
     r_LR(ψ, location)
 
 Right dominant eigenvector of the `AL`-`AR` transfermatrix.
 """
-r_LR(ψ::InfiniteMPS, loc::Int=length(ψ)) = ψ.C[loc]
+r_LR(ψ::InfiniteMPS, loc::Int=length(ψ)) = ψ.CR[loc]
 
 """
     r_LL(ψ, location)
 
 Right dominant eigenvector of the `AL`-`AL` transfermatrix.
 """
-r_LL(ψ::InfiniteMPS, loc::Int=length(ψ)) = ψ.C[loc] * adjoint(ψ.C[loc])
+r_LL(ψ::InfiniteMPS, loc::Int=length(ψ)) = ψ.CR[loc] * adjoint(ψ.CR[loc])

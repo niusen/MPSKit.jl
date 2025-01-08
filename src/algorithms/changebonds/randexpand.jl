@@ -33,7 +33,7 @@ function changebonds(ψ::InfiniteMPS, alg::RandExpand)
     return _expand(ψ, AL′, AR′)
 end
 
-function changebonds(ψ::MultilineMPS, alg::RandExpand)
+function changebonds(ψ::MPSMultiline, alg::RandExpand)
     return Multiline(map(x -> changebonds(x, alg), ψ.data))
 end
 

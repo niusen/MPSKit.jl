@@ -37,6 +37,7 @@ operators and models.
 using TensorOperations
 using TensorKit
 using MPSKit
+using MPSKitModels
 using LinearAlgebra: norm
 ```
 
@@ -47,6 +48,7 @@ using LinearAlgebra
 using TensorOperations
 using TensorKit
 using MPSKit
+using MPSKitModels
 ```
 
 Finite MPS are characterised by a set of tensors, one for each site, which each have 3 legs.
@@ -71,12 +73,12 @@ represent a vector of these tensors.
 ```@example finitemps
 al = mps.AL[3] # left gauged tensor of the third site
 @tensor E[a; b] := al[c, d, b] * conj(al[c, d, a])
-@show isapprox(E, id(right_virtualspace(mps, 3)))
+@show isapprox(E, id(left_virtualspace(mps, 3)))
 ```
 ```@example finitemps
 ar = mps.AR[3] # right gauged tensor of the third site
 @tensor E[a; b] := ar[a, d, c] * conj(ar[b, d, c])
-@show isapprox(E, id(left_virtualspace(mps, 3)))
+@show isapprox(E, id(right_virtualspace(mps, 2)))
 ```
 
 As the mps will be kept in a gauged form, updating a tensor will also update the gauged
@@ -84,8 +86,8 @@ tensors. For example, we can set the tensor of the third site to the identity, a
 gauged tensors will be updated accordingly.
 
 ```@example finitemps
-mps.C[3] = id(domain(mps.C[3]))
-mps
+mps.CR[3] = id(domain(mps.CR[3]))
+println(mps)
 ```
 
 These objects can then be used to compute observables and expectation values. For example,
@@ -104,16 +106,10 @@ Using the pre-defined models in `MPSKitModels`, we can construct the groundstate
 transverse field Ising model:
 
 ```@example finitemps
-J = 1.0
-g = 0.5
-lattice = fill(ComplexSpace(2), 10)
-X = TensorMap(ComplexF64[0 1; 1 0], ComplexSpace(2), ComplexSpace(2))
-Z = TensorMap(ComplexF64[1 0; 0 -1], space(X))
-H = FiniteMPOHamiltonian(lattice, (i, i+1) => -J * X ⊗ X for i in 1:length(lattice)-1) +
-    FiniteMPOHamiltonian(lattice, (i,) => - g * Z for i in 1:length(lattice))
+H = transverse_field_ising(; J=1.0, g=0.5)
 find_groundstate!(mps, H, DMRG(; maxiter=10))
 E0 = expectation_value(mps, H)
-println("<mps|H|mps> = $real(E0)")
+println("<mps|H|mps> = $(sum(real(E0)) / length(mps))")
 ```
 
 ### Infinite Matrix Product States
@@ -123,6 +119,7 @@ using LinearAlgebra
 using TensorOperations
 using TensorKit
 using MPSKit
+using MPSKitModels
 ```
 
 Similarly, an infinite MPS can be constructed by specifying the tensors for the unit cell,
@@ -136,16 +133,16 @@ mps = InfiniteMPS(d, D) # random MPS
 
 The `InfiniteMPS` object then handles the gauging of the MPS, which is necessary for many of
 the algorithms. This is done automatically upon creation of the object, and the user can
-access the gauged tensors by getting and setting the `AL`, `AR`, `C` and `AC` fields,
+access the gauged tensors by getting and setting the `AL`, `AR`, `CR`/`CL` and `AC` fields,
 which each represent a (periodic) vector of these tensors.
 
 ```@example infinitemps
-al = mps.AL[1] # left gauged tensor of the first site
+al = mps.AL[1] # left gauged tensor of the third site
 @tensor E[a; b] := al[c, d, b] * conj(al[c, d, a])
 @show isapprox(E, id(left_virtualspace(mps, 1)))
 ```
 ```@example infinitemps
-ar = mps.AR[1] # right gauged tensor of the first site
+ar = mps.AR[1] # right gauged tensor of the third site
 @tensor E[a; b] := ar[a, d, c] * conj(ar[b, d, c])
 @show isapprox(E, id(right_virtualspace(mps, 2)))
 ```
@@ -176,16 +173,11 @@ println("<mps|𝕀₁|mps> = $N2")
     observable computed from the MPS would either blow up to infinity or vanish to zero.
 
 Finally, the MPS can be optimized in order to determine groundstates of given Hamiltonians.
-There are plenty of pre-defined models in `MPSKitModels`, but we can also manually construct
-the groundstate for the transverse field Ising model:
+Using the pre-defined models in `MPSKitModels`, we can construct the groundstate for the
+transverse field Ising model:
 
 ```@example infinitemps
-J = 1.0
-g = 0.5
-lattice = PeriodicVector([ComplexSpace(2)])
-X = TensorMap(ComplexF64[0 1; 1 0], ComplexSpace(2), ComplexSpace(2))
-Z = TensorMap(ComplexF64[1 0; 0 -1], space(X))
-H = InfiniteMPOHamiltonian(lattice, (1, 2) => -J * X ⊗ X, (1,) => - g * Z)
+H = transverse_field_ising(; J=1.0, g=0.5)
 mps, = find_groundstate(mps, H, VUMPS(; maxiter=10))
 E0 = expectation_value(mps, H)
 println("<mps|H|mps> = $(sum(real(E0)) / length(mps))")

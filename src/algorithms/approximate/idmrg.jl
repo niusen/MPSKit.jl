@@ -1,15 +1,15 @@
-function approximate(ost::MultilineMPS, toapprox::Tuple{<:MultilineMPO,<:MultilineMPS},
+function approximate(ost::MPSMultiline, toapprox::Tuple{<:MPOMultiline,<:MPSMultiline},
                      alg::IDMRG1, oenvs=environments(ost, toapprox))
     ψ = copy(ost)
     mpo, above = toapprox
-    envs = IDMRGEnvironments(ost, oenvs)
+    envs = IDMRGEnv(ost, oenvs)
     log = IterLog("IDMRG")
     ϵ::Float64 = 2 * alg.tol
 
     LoggingExtras.withlevel(; alg.verbosity) do
         @infov 2 loginit!(log, ϵ)
         for iter in 1:(alg.maxiter)
-            C_current = ψ.C[:, 0]
+            C_current = ψ.CR[:, 0]
 
             # left to right sweep
             for col in 1:size(ψ, 2), row in 1:size(ψ, 1)
@@ -18,7 +18,7 @@ function approximate(ost::MultilineMPS, toapprox::Tuple{<:MultilineMPO,<:Multili
                 ψ.AC[row + 1, col] = h * above.AC[row, col]
                 normalize!(ψ.AC[row + 1, col])
 
-                ψ.AL[row + 1, col], ψ.C[row + 1, col] = leftorth(ψ.AC[row + 1, col])
+                ψ.AL[row + 1, col], ψ.CR[row + 1, col] = leftorth(ψ.AC[row + 1, col])
 
                 tm = TransferMatrix(above.AL[row, col], mpo[row, col], ψ.AL[row + 1, col])
                 setleftenv!(envs, row, col + 1, normalize(leftenv(envs, row, col) * tm))
@@ -31,14 +31,14 @@ function approximate(ost::MultilineMPS, toapprox::Tuple{<:MultilineMPO,<:Multili
                 ψ.AC[row + 1, col] = h * above.AC[row, col]
                 normalize!(ψ.AC[row + 1, col])
 
-                ψ.C[row + 1, col - 1], temp = rightorth(_transpose_tail(ψ.AC[row + 1, col]))
+                ψ.CR[row + 1, col - 1], temp = rightorth(_transpose_tail(ψ.AC[row + 1, col]))
                 ψ.AR[row + 1, col] = _transpose_front(temp)
 
                 tm = TransferMatrix(above.AR[row, col], mpo[row, col], ψ.AR[row + 1, col])
                 setrightenv!(envs, row, col - 1, normalize(tm * rightenv(envs, row, col)))
             end
 
-            ϵ = norm(C_current - ψ.C[:, 0])
+            ϵ = norm(C_current - ψ.CR[:, 0])
 
             if ϵ < alg.tol
                 @infov 2 logfinish!(log, iter, ϵ)
@@ -52,24 +52,24 @@ function approximate(ost::MultilineMPS, toapprox::Tuple{<:MultilineMPO,<:Multili
         end
     end
 
-    nst = MultilineMPS(map(x -> x, ψ.AR); tol=alg.tol_gauge)
+    nst = MPSMultiline(map(x -> x, ψ.AR); tol=alg.tol_gauge)
     nenvs = environments(nst, toapprox)
     return nst, nenvs, ϵ
 end
 
-function approximate(ost::MultilineMPS, toapprox::Tuple{<:MultilineMPO,<:MultilineMPS},
+function approximate(ost::MPSMultiline, toapprox::Tuple{<:MPOMultiline,<:MPSMultiline},
                      alg::IDMRG2, oenvs=environments(ost, toapprox))
     length(ost) < 2 && throw(ArgumentError("unit cell should be >= 2"))
     mpo, above = toapprox
     ψ = copy(ost)
-    envs = IDMRGEnvironments(ost, oenvs)
+    envs = IDMRGEnv(ost, oenvs)
     ϵ::Float64 = 2 * alg.tol
     log = IterLog("IDMRG2")
 
     LoggingExtras.withlevel(; alg.verbosity) do
         @infov 2 loginit!(log, ϵ)
         for iter in 1:(alg.maxiter)
-            C_current = ψ.C[:, 0]
+            C_current = ψ.CR[:, 0]
 
             # sweep from left to right
             for col in 1:size(ψ, 2), row in 1:size(ψ, 1)
@@ -81,7 +81,7 @@ function approximate(ost::MultilineMPS, toapprox::Tuple{<:MultilineMPO,<:Multili
                 normalize!(c)
 
                 ψ.AL[row + 1, col] = al
-                ψ.C[row + 1, col] = complex(c)
+                ψ.CR[row + 1, col] = complex(c)
                 ψ.AR[row + 1, col + 1] = _transpose_front(ar)
 
                 setleftenv!(envs, row, col + 1,
@@ -105,7 +105,7 @@ function approximate(ost::MultilineMPS, toapprox::Tuple{<:MultilineMPO,<:Multili
                 normalize!(c)
 
                 ψ.AL[row + 1, col] = al
-                ψ.C[row + 1, col] = complex(c)
+                ψ.CR[row + 1, col] = complex(c)
                 ψ.AR[row + 1, col + 1] = _transpose_front(ar)
 
                 setleftenv!(envs, row, col + 1,
@@ -120,7 +120,7 @@ function approximate(ost::MultilineMPS, toapprox::Tuple{<:MultilineMPO,<:Multili
             end
 
             # update error
-            ϵ = sum(zip(C_current, ψ.C[:, 0])) do (c1, c2)
+            ϵ = sum(zip(C_current, ψ.CR[:, 0])) do (c1, c2)
                 smallest = infimum(_firstspace(c1), _firstspace(c2))
                 e1 = isometry(_firstspace(c1), smallest)
                 e2 = isometry(_firstspace(c2), smallest)
@@ -139,7 +139,7 @@ function approximate(ost::MultilineMPS, toapprox::Tuple{<:MultilineMPO,<:Multili
         end
     end
 
-    nst = MultilineMPS(map(x -> x, ψ.AR); tol=alg.tol_gauge)
+    nst = MPSMultiline(map(x -> x, ψ.AR); tol=alg.tol_gauge)
     nenvs = environments(nst, toapprox)
     return nst, nenvs, ϵ
 end

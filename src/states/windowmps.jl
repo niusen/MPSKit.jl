@@ -43,7 +43,7 @@ struct WindowMPS{A<:GenericMPSTensor,B<:MPSBondTensor} <: AbstractFiniteMPS
     function WindowMPS(ψₗ::InfiniteMPS{A,B}, ψₘ::FiniteMPS{A,B},
                        ψᵣ::InfiniteMPS{A,B}=copy(ψₗ)) where {A<:GenericMPSTensor,
                                                              B<:MPSBondTensor}
-        left_virtualspace(ψₗ, 1) == left_virtualspace(ψₘ, 1) &&
+        left_virtualspace(ψₗ, 0) == left_virtualspace(ψₘ, 0) &&
             right_virtualspace(ψₘ, length(ψₘ)) == right_virtualspace(ψᵣ, length(ψₘ)) ||
             throw(SpaceMismatch("Mismatch between window and environment virtual spaces"))
         return new{A,B}(ψₗ, ψₘ, ψᵣ)
@@ -62,7 +62,7 @@ end
 function WindowMPS(f, elt, physspaces::Vector{<:Union{S,CompositeSpace{S}}},
                    maxvirtspace::S, ψₗ::InfiniteMPS,
                    ψᵣ::InfiniteMPS=ψₗ) where {S<:ElementarySpace}
-    ψₘ = FiniteMPS(f, elt, physspaces, maxvirtspace; left=left_virtualspace(ψₗ, 1),
+    ψₘ = FiniteMPS(f, elt, physspaces, maxvirtspace; left=left_virtualspace(ψₗ, 0),
                    right=right_virtualspace(ψᵣ, length(physspaces)))
     return WindowMPS(ψₗ, ψₘ, ψᵣ)
 end
@@ -105,7 +105,7 @@ function WindowMPS(ψ::InfiniteMPS{A,B}, L::Int) where {A,B}
     ALs .= ψ.AL[1:L]
     ARs .= ψ.AR[1:L]
     ACs .= ψ.AC[1:L]
-    CLs .= ψ.C[0:L]
+    CLs .= ψ.CR[0:L]
 
     return WindowMPS(ψ, FiniteMPS(ALs, ARs, ACs, CLs), ψ)
 end
@@ -148,15 +148,11 @@ function Base.getproperty(ψ::WindowMPS, prop::Symbol)
         return ARView(ψ)
     elseif prop == :AC
         return ACView(ψ)
-    elseif prop == :C
-        return CView(ψ)
+    elseif prop == :CR
+        return CRView(ψ)
     else
         return getfield(ψ, prop)
     end
-end
-
-function Base.propertynames(::WindowMPS)
-    return (:AL, :AR, :AC, :C)
 end
 
 max_Ds(ψ::WindowMPS) = max_Ds(ψ.window)

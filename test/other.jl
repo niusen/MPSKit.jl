@@ -11,12 +11,6 @@ using MPSKit
 using TensorKit
 using TensorKit: ℙ
 using Plots
-using Aqua
-
-@testset "Aqua" begin
-    # TODO fix this
-    Aqua.test_all(MPSKit; ambiguities=false, piracies=false, unbound_args=false)
-end
 
 @testset "plot tests" begin
     ψ = InfiniteMPS([ℙ^2], [ℙ^5])

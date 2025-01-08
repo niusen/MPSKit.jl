@@ -8,17 +8,18 @@ function _transpose_tail(t::AbstractTensorMap) # make TensorMap{S,1,N₁+N₂-1}
     I2 = TensorKit.domainind(t)
     return transpose(t, ((I1[1],), (I2..., reverse(Base.tail(I1))...)))
 end
-function _transpose_as(t1::AbstractTensorMap, t2::AbstractTensorMap)
+function _transpose_as(t1::AbstractTensorMap,
+                       t2::AbstractTensorMap{S,N1,N2}) where {S,N1,N2}
     I1 = (TensorKit.codomainind(t1)..., reverse(TensorKit.domainind(t1))...)
 
-    A = ntuple(x -> I1[x], numout(t2))
-    B = ntuple(x -> I1[x + numout(t2)], numin(t2))
+    A = ntuple(x -> I1[x], N1)
+    B = ntuple(x -> I1[x + N1], N2)
 
     return transpose(t1, (A, B))
 end
 
-function _repartition!(tdst::AbstractTensorMap{<:Any,S,N₁,N₂},
-                       tsrc::AbstractTensorMap{<:Any,S}) where {S,N₁,N₂}
+function _repartition!(tdst::AbstractTensorMap{S,N₁,N₂},
+                       tsrc::AbstractTensorMap{S}) where {S,N₁,N₂}
     numind(tdst) == numind(tsrc) || throw(ArgumentError("number of indices must match"))
     inds_dst = (TensorKit.codomainind(tdst)..., reverse(TensorKit.domainind(tdst))...)
     inds_src = (TensorKit.codomainind(tsrc)..., reverse(TensorKit.domainind(tsrc))...)
@@ -38,8 +39,8 @@ _firstspace(t::AbstractTensorMap) = space(t, 1)
 _lastspace(t::AbstractTensorMap) = space(t, numind(t))
 
 #given a hamiltonian with unit legs on the side, decompose it using svds to form a "localmpo"
-function decompose_localmpo(inpmpo::AbstractTensorMap{T,PS,N,N},
-                            trunc=truncbelow(Defaults.tol)) where {T,PS,N}
+function decompose_localmpo(inpmpo::AbstractTensorMap{PS,N,N},
+                            trunc=truncbelow(Defaults.tol)) where {PS,N}
     N == 2 && return [inpmpo]
 
     leftind = (N + 1, 1, 2)
@@ -53,8 +54,8 @@ function decompose_localmpo(inpmpo::AbstractTensorMap{T,PS,N,N},
 end
 
 # given a state with util legs on the side, decompose using svds to form an array of mpstensors
-function decompose_localmps(state::AbstractTensorMap{T,PS,N,1},
-                            trunc=truncbelow(Defaults.tol)) where {T,PS,N}
+function decompose_localmps(state::AbstractTensorMap{PS,N,1},
+                            trunc=truncbelow(Defaults.tol)) where {PS,N}
     N == 2 && return [state]
 
     leftind = (1, 2)
@@ -73,7 +74,7 @@ end
 Add trivial one-dimensional utility spaces with trivial sector to the left and right of a
 given tensor map, i.e. as the first space of the codomain and the last space of the domain.
 """
-function add_util_leg(tensor::AbstractTensorMap{T,S,N1,N2}) where {T,S,N1,N2}
+function add_util_leg(tensor::AbstractTensorMap{S,N1,N2}) where {S,N1,N2}
     ou = oneunit(_firstspace(tensor))
 
     util_front = isomorphism(storagetype(tensor), ou * codomain(tensor), codomain(tensor))
@@ -141,11 +142,10 @@ function fill_data!(a::TensorMap, dfun)
     return a
 end
 randomize!(a::TensorMap) = fill_data!(a, randn)
-function randomize!(a::AbstractBlockTensorMap)
-    for t in nonzero_values(a)
-        randomize!(t)
-    end
-    return a
+
+function safe_xlogx(t::AbstractTensorMap, eps=eps(real(scalartype(t))))
+    (U, S, V) = tsvd(t; alg=SVD(), trunc=truncbelow(eps))
+    return U * S * log(S) * V
 end
 
 """
@@ -162,14 +162,4 @@ end
 # check all elements are equal -> only defined in 1.8+
 @static if !isdefined(Base, :allequal)
     allequal(itr) = isempty(itr) ? true : all(isequal(first(itr)), itr)
-end
-
-function check_length(a, b...)
-    L = length(a)
-    all(==(L), length.(b)) || throw(ArgumentError("lengths must match"))
-    return L
-end
-
-function fuser(::Type{T}, V1::S, V2::S) where {T,S<:IndexSpace}
-    return isomorphism(T, fuse(V1 ⊗ V2), V1 ⊗ V2)
 end
